@@ -37,6 +37,8 @@ For a read-only check against Nord's current public metadata, run the same execu
 3. If Nord's IKEv2 certificate is not already trusted, use the explicit certificate setup action or the linked official guide. The installer verifies the reviewed certificate's SHA-256 digest and scopes new trust to EAP and IPsec. It refuses to overwrite existing custom trust settings.
 4. Select a country for its fastest available server, or choose a city, then click Connect. macOS may request authorization to create or update Meridian's own native configuration.
 
+Version 0.2.1 also repairs older Meridian Keychain entries that omitted Apple's IKEv2 password reader. The repair runs on a requested connection, preserves the credential reference and existing access rules, and skips writes once access is correct. It does not require another Nord Account sign-in. A live connection must still confirm that the repeated VPN password dialog is resolved.
+
 A selected location is a request. Meridian displays Connected only after the native session reports it. A failed switch keeps the requested location and offers Retry. Cancel and Disconnect invalidate pending requests. Reconnection attempts use backoff after an established connection drops, while Meridian remains open; the app does not connect merely because it launches.
 
 Quitting leaves the current VPN as it is and stops the app's automatic reconnects. Disconnect explicitly before quitting if you want the tunnel stopped.

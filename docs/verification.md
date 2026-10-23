@@ -27,6 +27,14 @@ Read-only checks after import matched the starting Wi-Fi power state, configured
 
 The final 0.2.0 release executable is 1,114,288 bytes and its app bundle is 1,527,125 bytes, approximately 1.46 MiB. A fresh normal menu-bar process with the popover closed used 49,264–49,280 KiB RSS, approximately 48.1 MiB. Four one-second-spaced samples reported 0.0% CPU and unchanged cumulative CPU time. This is a short idle sample, not a hard cap or a physical-footprint measurement. The external browser's authentication cost and active IKEv2 service cost are excluded.
 
+## Credential access repair, version 0.2.1
+
+The user reported a repeated native VPN password dialog. Read-only inspection found that Meridian's saved profile had the current username and persistent Keychain reference. The stored entry trusted `neagent` and `nesessionmanager`, but omitted the Apple IKEv2 provider process seen in the connection logs. No secret values or private profile identifiers were inspected or exported.
+
+The read-policy regression check failed before adding that process. It now checks the production policy and verifies that repairing an older in-memory policy is idempotent. A separate local probe applied the production repair to a copy of the real entry's policy: the first pass added the missing reader and the second changed nothing. Independent metadata readback confirmed that the stored policy and reference remained unchanged during verification. Rust checks, the optimized native build, signature verification, and offline native/account checks passed.
+
+The updated app repairs an older entry at the next requested connection, before handing its reference to native VPN controls. Verification did not start or stop a tunnel, change a saved VPN profile, or modify the real entry's policy. An actual connection is still required to confirm that this resolves the dialog; the access defect alone does not rule out a further native credential lookup or server-authentication issue.
+
 ## Initial measurements
 
 | Measurement | Observed |

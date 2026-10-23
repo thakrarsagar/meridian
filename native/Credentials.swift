@@ -1,6 +1,7 @@
 import AppKit
 import Security
 import CryptoKit
+import NetworkExtension
 
 enum Credentials {
     // Stable storage identity preserves credentials entered in the first local preview.
@@ -29,12 +30,17 @@ enum Credentials {
             throw error("Enter your Nord service username and password.")
         }
         let values: [String: Any] = [kSecAttrAccount as String: username, kSecValueData as String: Data(password.utf8),
-            kSecAttrLabel as String: "Meridian IKEv2 service credentials"]
+            kSecAttrLabel as String: "Meridian IKEv2 service credentials", kSecAttrAccess as String: try vpnAccess()]
         let status = SecItemUpdate(query as CFDictionary, values as CFDictionary)
         if status != errSecItemNotFound { try check(status); return }
 
+        let item = query.merging(values) { _, new in new }
+        try check(SecItemAdd(item as CFDictionary, nil))
+    }
+
+    static func vpnAccess() throws -> SecAccess {
         var trusted: [SecTrustedApplication] = []
-        for path in [Bundle.main.executablePath!, "/usr/libexec/neagent", "/usr/libexec/nesessionmanager"] {
+        for path in [Bundle.main.executablePath!, "/usr/libexec/neagent", "/usr/libexec/nesessionmanager", try providerPath()] {
             var application: SecTrustedApplication?
             let result = path.withCString { SecTrustedApplicationCreateFromPath($0, &application) }
             try check(result)
@@ -42,10 +48,60 @@ enum Credentials {
         }
         var access: SecAccess?
         try check(SecAccessCreate("Meridian IKEv2 service credentials" as CFString, trusted as CFArray, &access))
-        var item = query.merging(values) { _, new in new }
-        item[kSecAttrLabel as String] = "Meridian IKEv2 service credentials"
-        item[kSecAttrAccess as String] = access
-        try check(SecItemAdd(item as CFDictionary, nil))
+        return access!
+    }
+
+    static func prepareForConnection() throws -> (username: String, reference: Data)? {
+        guard let saved = try load() else { return nil }
+        // Repair only this entry's read policy; do not read its secret or replace its reference.
+        var result: CFTypeRef?
+        try check(SecItemCopyMatching([kSecClass as String: kSecClassGenericPassword,
+            kSecValuePersistentRef as String: saved.reference, kSecReturnRef as String: true] as CFDictionary, &result))
+        guard let result else { throw error("Keychain did not return the saved credential item.") }
+        let item = result as! SecKeychainItem
+        var access: SecAccess?
+        try check(SecKeychainItemCopyAccess(item, &access))
+        guard let access else { throw error("Keychain did not return the credential access policy.") }
+        if try allowVPNProvider(in: access) { try check(SecKeychainItemSetAccess(item, access)) }
+        return saved
+    }
+
+    static func allowVPNProvider(in access: SecAccess) throws -> Bool {
+        var provider: SecTrustedApplication?
+        try check(SecTrustedApplicationCreateFromPath(try providerPath(), &provider))
+        var expected: CFData?
+        try check(SecTrustedApplicationCopyData(provider!, &expected))
+        guard let acls = SecAccessCopyMatchingACLList(access, kSecACLAuthorizationDecrypt) as? [SecACL], !acls.isEmpty else {
+            throw error("The saved credential has no readable Keychain access policy. Update credentials in Settings.")
+        }
+        // One existing decrypt rule already granting access is sufficient. Preserve other rules.
+        for acl in acls {
+            var apps: CFArray?; var description: CFString?; var prompt = SecKeychainPromptSelector()
+            try check(SecACLCopyContents(acl, &apps, &description, &prompt))
+            if apps == nil { return false }
+            for app in apps as? [SecTrustedApplication] ?? [] {
+                var data: CFData?
+                try check(SecTrustedApplicationCopyData(app, &data))
+                if data! as Data == expected! as Data { return false }
+            }
+        }
+        let acl = acls[0]
+        var apps: CFArray?; var description: CFString?; var prompt = SecKeychainPromptSelector()
+        try check(SecACLCopyContents(acl, &apps, &description, &prompt))
+        guard let description else { throw error("Keychain did not return the credential policy description.") }
+        var trusted = apps as? [SecTrustedApplication] ?? []
+        trusted.append(provider!)
+        try check(SecACLSetContents(acl, trusted as CFArray, description, prompt))
+        return true
+    }
+
+    private static func providerPath() throws -> String {
+        guard let url = Bundle(for: NEVPNProtocolIKEv2.self).builtInPlugInsURL?
+            .appendingPathComponent("NEIKEv2Provider.appex/Contents/MacOS/NEIKEv2Provider"),
+              FileManager.default.isExecutableFile(atPath: url.path) else {
+            throw error("macOS's IKEv2 credential reader is unavailable. Meridian left your saved credentials unchanged.")
+        }
+        return url.path
     }
 
     static func check(_ status: OSStatus) throws {

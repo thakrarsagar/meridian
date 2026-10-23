@@ -26,7 +26,7 @@ AppKit uses system fonts, semantic colors, SF Symbols, standard search and table
 
 URLSession owns HTTP and TLS. Its ephemeral session has no cookies, credential storage, or URL cache. It bounds time and body size, refuses redirects, and counts requests and compressed response bytes using task metrics. The disk cache stores only public catalogue data and a Last-Modified value. It is refreshed on first use without a cache or by explicit request.
 
-Keychain stores the password with access for this app and the relevant Apple VPN helpers. Only the username and a persistent reference leave the credential module. Certificate setup requires an explicit user action, a matching SHA-256 digest, and scoped EAP/IPsec trust. Existing user trust settings are preserved.
+Keychain stores the password with access for this app, `neagent`, `nesessionmanager`, and Apple's actual `NEIKEv2Provider` executable, resolved from the system framework's plug-ins directory. New saves and replacements include this read policy. Before a requested connection, the credential module repairs an older entry's decrypt policy only if the IKEv2 reader is missing. This appends that reader while preserving other readers, prompt flags, the secret, and the persistent reference. An already-correct policy is not rewritten. Startup and Settings reads remain read-only. Only the username and persistent reference leave the credential module. Certificate setup requires an explicit user action, a matching SHA-256 digest, and scoped EAP/IPsec trust. Existing user trust settings are preserved.
 
 ## Nord Account import
 

@@ -161,7 +161,7 @@ final class AppModel {
         case "connect":
             nativeGeneration = generation
             do {
-                guard let credentials = try Credentials.load(), let host = state.hostname else {
+                guard let credentials = try Credentials.prepareForConnection(), let host = state.hostname else {
                     throw Credentials.error("Save your Nord service credentials in Settings before connecting.")
                 }
                 vpn.connect(host: host, username: credentials.username, passwordReference: credentials.reference) { [weak self] error in

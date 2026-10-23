@@ -1,5 +1,7 @@
 import Foundation
 import CryptoKit
+import Security
+import NetworkExtension
 
 // Intercepts the production URLSession transport. These tests never leave this process.
 private final class Fixture: URLProtocol {
@@ -56,11 +58,41 @@ private func loginResponse(_ redirect: String? = nil) -> Data {
 @main
 enum AccountTests {
     static func main() {
+        vpnCredentialAccess()
         success()
         invalidReturns()
         failedFetch()
         cancelledBrowserAndFetch()
-        print("PASS: native account import, proof binding, strict callback validation, HTTP failure, and cancellation. No browser, Keychain, VPN, or live network operations.")
+        print("PASS: IKEv2 credential-reader policy and idempotent repair; native account import, proof binding, callback validation, HTTP failure, and cancellation. No stored Keychain writes, browser, VPN, or live network operations.")
+    }
+
+    private static func vpnCredentialAccess() {
+        let executable = Bundle(for: NEVPNProtocolIKEv2.self).builtInPlugInsURL!
+            .appendingPathComponent("NEIKEv2Provider.appex/Contents/MacOS/NEIKEv2Provider")
+        var provider: SecTrustedApplication?
+        try! Credentials.check(SecTrustedApplicationCreateFromPath(executable.path, &provider))
+        var expected: CFData?
+        try! Credentials.check(SecTrustedApplicationCopyData(provider!, &expected))
+        let access = try! Credentials.vpnAccess()
+        let acls = SecAccessCopyMatchingACLList(access, kSecACLAuthorizationDecrypt) as! [SecACL]
+        var found = false
+        for acl in acls {
+            var apps: CFArray?; var description: CFString?; var prompt = SecKeychainPromptSelector()
+            try! Credentials.check(SecACLCopyContents(acl, &apps, &description, &prompt))
+            for app in apps as? [SecTrustedApplication] ?? [] {
+                var data: CFData?
+                try! Credentials.check(SecTrustedApplicationCopyData(app, &data))
+                if data! as Data == expected! as Data { found = true }
+            }
+        }
+        precondition(found, "Apple's IKEv2 provider is missing from the credential read policy")
+        precondition(try! !Credentials.allowVPNProvider(in: access), "An up-to-date policy must not be rewritten")
+        var caller: SecTrustedApplication?
+        try! Credentials.check(SecTrustedApplicationCreateFromPath(Bundle.main.executablePath!, &caller))
+        var oldAccess: SecAccess?
+        try! Credentials.check(SecAccessCreate("test-only policy" as CFString, [caller!] as CFArray, &oldAccess))
+        precondition(try! Credentials.allowVPNProvider(in: oldAccess!))
+        precondition(try! !Credentials.allowVPNProvider(in: oldAccess!))
     }
 
     private static func success() {

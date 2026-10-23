@@ -396,19 +396,49 @@ final class PopoverController: NSViewController, NSTableViewDataSource, NSTableV
     @objc private func quitPressed() { NSApp.terminate(nil) }
 }
 
-final class SettingsController: NSWindowController {
+final class SettingsController: NSWindowController, NSWindowDelegate {
     let model: AppModel
+    var showLocations: (() -> Void)?
     private let username = NSTextField()
     private let password = NSSecureTextField()
     private let result = Style.label("", size: 12, color: .secondaryLabelColor)
     private let certificate = NSButton(title: "Set up Nord certificate…", target: nil, action: nil)
+    private let signIn = NSButton(title: "Sign in with Nord Account", target: nil, action: nil)
+    private let save = NSButton(title: "Save credentials", target: nil, action: nil)
+    private let chooseLocation = NSButton(title: "Choose a location", target: nil, action: nil)
+    private let manual = NSButton(title: "Enter IKEv2 credentials manually", target: nil, action: nil)
+    private let activity = NSProgressIndicator()
+    private var manualFields: NSStackView!
+    private var layout: NSStackView!
+    private lazy var account = NordAccount(http: model.http, openBrowser: { [weak self] url, completion in
+        guard let window = self?.window else {
+            completion(.failure(NordAccount.SignInError.browserUnavailable)); return {}
+        }
+        let browser = AccountBrowser(anchor: window)
+        browser.open(url, completion: completion)
+        return { browser.cancel() }
+    })
     init(model: AppModel) {
         self.model = model
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 430),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 560),
             styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "Meridian Settings"; window.isReleasedWhenClosed = false
         super.init(window: window)
-        let intro = Style.label("Enter IKEv2 credentials", size: 21, weight: .semibold)
+        window.delegate = self
+        let intro = Style.label("Nord Account", size: 21, weight: .semibold)
+        let browserHelp = Style.label("Sign in once through your browser. Meridian fetches your IKEv2 credentials and keeps them in Keychain.", size: 12, color: .secondaryLabelColor)
+        browserHelp.maximumNumberOfLines = 3; browserHelp.preferredMaxLayoutWidth = 392
+        browserHelp.lineBreakMode = .byWordWrapping
+        signIn.target = self; signIn.action = #selector(signInPressed)
+        signIn.bezelStyle = .rounded; signIn.controlSize = .large; signIn.bezelColor = Style.accent
+        manual.target = self; manual.action = #selector(toggleManual)
+        manual.isBordered = false; manual.contentTintColor = .secondaryLabelColor
+        manual.setAccessibilityLabel("Show manual IKEv2 setup")
+        manual.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)
+        manual.imagePosition = .imageLeading
+        chooseLocation.target = self; chooseLocation.action = #selector(chooseLocationPressed)
+        chooseLocation.bezelStyle = .rounded; chooseLocation.controlSize = .large
+        chooseLocation.isHidden = true
         let explanation = Style.label("Use the service username and password from Nord's manual setup page. These differ from your account email and password.", size: 12, color: .secondaryLabelColor)
         explanation.maximumNumberOfLines = 3; explanation.preferredMaxLayoutWidth = 392
         explanation.lineBreakMode = .byWordWrapping
@@ -417,8 +447,8 @@ final class SettingsController: NSWindowController {
         username.controlSize = .large; password.controlSize = .large
         let account = NSButton(title: "Get IKEv2 service credentials ↗", target: self, action: #selector(openAccount))
         account.isBordered = false; account.contentTintColor = Style.accent
-        let save = NSButton(title: "Save credentials", target: self, action: #selector(savePressed))
-        save.bezelStyle = .rounded; save.controlSize = .large; save.keyEquivalent = "\r"
+        save.target = self; save.action = #selector(savePressed)
+        save.bezelStyle = .rounded; save.controlSize = .large
         let stored = Style.label("Saved in your login Keychain. Never sent to the location catalogue.", size: 11, color: .secondaryLabelColor)
         stored.maximumNumberOfLines = 2; stored.preferredMaxLayoutWidth = 392
         stored.lineBreakMode = .byWordWrapping
@@ -429,27 +459,92 @@ final class SettingsController: NSWindowController {
         let certificateRow = Style.stack([certificate, guide], orientation: .horizontal, spacing: 12)
         result.maximumNumberOfLines = 3; result.preferredMaxLayoutWidth = 392
         result.lineBreakMode = .byWordWrapping
-        let layout = Style.stack([intro, explanation, account, username, password, save, stored, separator, certificateRow, result], spacing: 12)
+        activity.style = .spinning; activity.controlSize = .small
+        activity.isDisplayedWhenStopped = false; activity.isHidden = true
+        activity.setAccessibilityLabel("Signing in to Nord Account")
+        let progress = Style.stack([activity, result], orientation: .horizontal, spacing: 8)
+        manualFields = Style.stack([explanation, account, username, password, save, stored], spacing: 12)
+        manualFields.isHidden = true
+        layout = Style.stack([intro, browserHelp, signIn, progress, chooseLocation, manual, manualFields, separator, certificateRow], spacing: 12)
         layout.translatesAutoresizingMaskIntoConstraints = false
         window.contentView!.addSubview(layout)
-        for child in [explanation, username, password, stored, separator, result] { child.widthAnchor.constraint(equalTo: layout.widthAnchor).isActive = true }
+        for child in [browserHelp, manualFields!, explanation, username, password, stored, separator, progress] { child.widthAnchor.constraint(equalTo: layout.widthAnchor).isActive = true }
         NSLayoutConstraint.activate([
             layout.leadingAnchor.constraint(equalTo: window.contentView!.leadingAnchor, constant: 24),
             layout.trailingAnchor.constraint(equalTo: window.contentView!.trailingAnchor, constant: -24),
             layout.topAnchor.constraint(equalTo: window.contentView!.topAnchor, constant: 24),
             layout.bottomAnchor.constraint(lessThanOrEqualTo: window.contentView!.bottomAnchor, constant: -20)
         ])
-        if let saved = try? Credentials.load() { username.stringValue = saved.username; password.placeholderString = "Saved in Keychain" }
-        window.center()
+        if let saved = try? Credentials.load() {
+            username.stringValue = saved.username; password.placeholderString = "Saved in Keychain"
+            result.stringValue = "Service credentials saved in Keychain."
+            credentialsReady()
+        }
+        self.account.progress = { [weak self] text in
+            self?.result.stringValue = text; self?.result.textColor = .secondaryLabelColor
+        }
+        resizeToFit(); window.center()
     }
     required init?(coder: NSCoder) { fatalError() }
+    @objc private func signInPressed() {
+        if account.isSigningIn { account.cancel(); return }
+        signIn.title = "Cancel sign-in"
+        activity.isHidden = false; activity.startAnimation(nil)
+        chooseLocation.isHidden = true
+        manual.isEnabled = false
+        username.isEnabled = false; password.isEnabled = false; save.isEnabled = false
+        resizeToFit()
+        account.signIn { [weak self] response in
+            guard let self else { return }
+            self.signIn.title = "Sign in with Nord Account"
+            self.activity.stopAnimation(nil); self.activity.isHidden = true
+            self.manual.isEnabled = true
+            self.username.isEnabled = true; self.password.isEnabled = true; self.save.isEnabled = true
+            switch response {
+            case .success:
+                if let saved = try? Credentials.load() { self.username.stringValue = saved.username }
+                self.password.stringValue = ""; self.password.placeholderString = "Saved in Keychain"
+                self.result.stringValue = "Ready. Your IKEv2 credentials are saved in Keychain."
+                self.result.textColor = .secondaryLabelColor
+                self.credentialsReady()
+                NSApp.activate(ignoringOtherApps: true)
+                self.window?.makeKeyAndOrderFront(nil)
+            case .failure(let error):
+                self.result.stringValue = error.localizedDescription
+                self.result.textColor = (error as? NordAccount.SignInError) == .cancelled ? .secondaryLabelColor : .systemRed
+            }
+            self.resizeToFit()
+        }
+    }
+    private func credentialsReady() {
+        chooseLocation.isHidden = false; chooseLocation.bezelColor = Style.accent
+        signIn.title = "Update credentials"; signIn.bezelColor = nil
+    }
+    private func resizeToFit() {
+        guard let window else { return }
+        window.contentView?.layoutSubtreeIfNeeded()
+        let content = NSRect(x: 0, y: 0, width: 440, height: layout.fittingSize.height + 48)
+        var frame = window.frameRect(forContentRect: content)
+        frame.origin = NSPoint(x: window.frame.minX, y: window.frame.maxY - frame.height)
+        window.setFrame(frame, display: true)
+    }
+    @objc private func toggleManual() {
+        manualFields.isHidden.toggle()
+        manual.image = NSImage(systemSymbolName: manualFields.isHidden ? "chevron.right" : "chevron.down", accessibilityDescription: nil)
+        manual.setAccessibilityLabel(manualFields.isHidden ? "Show manual IKEv2 setup" : "Hide manual IKEv2 setup")
+        resizeToFit()
+    }
+    @objc private func chooseLocationPressed() { close(); showLocations?() }
+    func windowWillClose(_ notification: Notification) { account.cancel() }
     @objc private func savePressed() {
         do {
             try Credentials.save(username: username.stringValue.trimmingCharacters(in: .whitespacesAndNewlines), password: password.stringValue)
             password.stringValue = ""; password.placeholderString = "Saved in Keychain"
             result.stringValue = "Credentials saved. Choose a location and click Connect."
             result.textColor = .secondaryLabelColor
+            credentialsReady()
         } catch { result.stringValue = error.localizedDescription; result.textColor = .systemRed }
+        resizeToFit()
     }
     @objc private func openAccount() { NSWorkspace.shared.open(URL(string: "https://my.nordaccount.com/dashboard/nordvpn/")!) }
     @objc private func openGuide() { NSWorkspace.shared.open(NordCertificate.guide) }
@@ -541,7 +636,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     @objc func openSettings() {
         popover?.performClose(nil)
-        if settings == nil { settings = SettingsController(model: model) }
+        if settings == nil {
+            settings = SettingsController(model: model)
+            settings?.showLocations = { [weak self] in
+                guard let self else { return }
+                if let previewWindow = self.previewWindow { previewWindow.makeKeyAndOrderFront(nil) }
+                else { self.togglePopover() }
+            }
+        }
         NSApp.activate(ignoringOtherApps: true)
         settings?.showWindow(nil); settings?.window?.makeKeyAndOrderFront(nil)
     }

@@ -6,7 +6,7 @@ Meridian is an independent, unofficial project. It requires an active NordVPN su
 
 ## Current status
 
-This is an early local build. The catalogue, Rust state transitions, native compilation, and offline checks can be verified without changing networking. Authenticated VPN activation, location switching, and coexistence with Tailscale still require a separate live test. Do not treat a successful build as proof of those behaviors.
+This is an early local build. Nord Account sign-in and automatic Keychain import have passed a live check on the development Mac. The catalogue, Rust state transitions, native compilation, and offline checks also pass. Authenticated VPN activation, location switching, and coexistence with Tailscale still require a separate live test. Do not treat a successful sign-in as proof of those behaviors.
 
 The no-paid-signing implementation uses private macOS configuration and session controls with ordinary OS authorization. It does not install a helper or weaken system security. These unsupported interfaces can change after a macOS update. The documented minimum deployment target is macOS 14; runtime availability is checked, but OS compatibility must be tested individually.
 
@@ -33,7 +33,7 @@ For a read-only check against Nord's current public metadata, run the same execu
 ## Use
 
 1. Open Meridian from the menu bar. The first opening fetches all available IKEv2 countries and cities; subsequent launches use the disk cache. Use Refresh to update it.
-2. Open Settings and save your Nord service credentials in the login Keychain. The password never enters Rust or a catalogue request.
+2. Open Settings and choose **Sign in with Nord Account**. Complete any browser consent, Nord sign-in, and MFA that Nord requests. An existing browser session can complete automatically. Meridian returns to the foreground, fetches your IKEv2 service credentials, and saves them in the login Keychain. Choose **Choose a location** when ready. Your account password stays in the browser; account tokens are discarded after import. Manual IKEv2 entry is available behind **Enter IKEv2 credentials manually**. Sign-in does not connect a VPN.
 3. If Nord's IKEv2 certificate is not already trusted, use the explicit certificate setup action or the linked official guide. The installer verifies the reviewed certificate's SHA-256 digest and scopes new trust to EAP and IPsec. It refuses to overwrite existing custom trust settings.
 4. Select a country for its fastest available server, or choose a city, then click Connect. macOS may request authorization to create or update Meridian's own native configuration.
 
@@ -46,6 +46,7 @@ Quitting leaves the current VPN as it is and stops the app's automatic reconnect
 - One app process, an in-process Rust library, and Apple's IKEv2 engine. No web runtime, VPN daemon, packet engine, analytics, or login item.
 - No catalogue polling or latency probes. A first-use/manual catalogue fetch and one recommendation request per Connect use system URLSession and TLS.
 - Bounded responses, conditional catalogue refresh, a small disk cache, and event-driven VPN status. Automatic reconnection reuses the selected endpoint.
+- Account import makes three bounded API requests plus the system browser's sign-in traffic. No account polling, persistent account session, embedded web view, or added HTTP/TLS library.
 - No Wi-Fi, global DNS, route, Tailscale, or other-VPN preference changes. Only Meridian's UUID with matching app ownership can be updated or controlled.
 - No kill switch. When the tunnel is disconnected, ordinary traffic may use the normal connection.
 
@@ -59,6 +60,7 @@ Tailscale coexistence is a design requirement and a live acceptance test, not a 
 | `native/Core.swift` | Rust interface and bounded system HTTP transport |
 | `native/App.swift` | AppKit interface, cache, and event delivery |
 | `native/Credentials.swift` | Keychain references and explicit, scoped certificate setup |
+| `native/NordAccount.swift` | Native browser sign-in, proof-key exchange, bounded credential import, and cancellation |
 | `native/NativeVPN.m` | Owned-profile checks, ordinary authorization, verified saves, and private native session control |
 
 Read [AGENTS.md](AGENTS.md) for engineering conventions and [architecture](docs/architecture.md) for the small interfaces and their invariants. The module design follows [Matt Pocock's codebase-design skill](https://github.com/mattpocock/skills/blob/main/skills/engineering/codebase-design/SKILL.md).
@@ -70,3 +72,5 @@ Read [AGENTS.md](AGENTS.md) for engineering conventions and [architecture](docs/
 - [VPNStatus source documenting native session control](https://github.com/Timac/VPNStatus)
 
 Private declarations and behavior must be reviewed after macOS changes. Never remove ownership checks or authorization to work around a platform failure.
+
+Account sign-in follows the protocol in [Nord's published Linux client](https://github.com/NordSecurity/nordvpn-linux/blob/main/core/authentication.go). It is not a documented third-party OAuth registration contract. Meridian uses a session-local browser return handler and leaves the installed NordVPN app's URL registration alone.

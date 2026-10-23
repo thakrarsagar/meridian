@@ -13,6 +13,20 @@ Date: 2026-10-24. Initial local release build on Apple Silicon, macOS 26.5.2.
 
 Reproduce the offline checks with `rtk proxy bash scripts/check.sh`. Optional live public-metadata verification uses `rtk proxy build/Meridian.app/Contents/MacOS/Meridian --check-catalogue`; it makes three public requests and performs zero VPN operations. `--preview` opens the same interface in a standard native window for accessibility inspection.
 
+## Nord Account import, version 0.2.0
+
+- Offline checks exercise the production HTTP and import implementation with URLProtocol, a controlled browser callback, and a recording save. They cover proof-key binding, Nord's required `Bearer token:` authorization format, invalid/duplicate return parameters, an untrusted login URL, failed/invalid credential responses, browser cancellation, and cancellation during credential retrieval. Tests open no browser, contact no server, and touch no Keychain or VPN.
+- A live attempt reproduced HTTP 400 after successful browser return and token exchange. The credential request had omitted Nord's required `token:` prefix. The corrected contract fixture failed before the header fix and passed afterward. A public probe using a deliberately invalid, correctly shaped dummy token distinguished malformed authorization, HTTP 400, from accepted syntax with invalid credentials, HTTP 401.
+- The corrected native build completed a real browser sign-in, token exchange, credential fetch, and Keychain save on this Mac. The existing Brave session completed authentication without entering an account password into Meridian. The native UI confirmed that the IKEv2 credentials were saved. Account tokens and credential values were neither logged nor exported.
+- Native UI inspection verified the compact account view, optional manual-entry disclosure, and Choose a location returning to the catalogue while still Disconnected. Saved credentials remain available after restarting the app. OS consent and Nord's authentication/MFA steps remain under user control.
+- The updated shared transport passed the public metadata check: 150 countries, 225 cities, a valid online IKEv2 recommendation, and conditional HTTP 304. Three requests transferred 13,084 response-body bytes; zero VPN effects were executed.
+
+Account import was tested independently of VPN activation. No network preference, certificate trust, installed browser default, or Tailscale setting was changed during this work.
+
+Read-only checks after import matched the starting Wi-Fi power state, configured Wi-Fi DNS, and Tailscale running/DNS/route/shield preferences. No Meridian VPN service or saved profile identity was present.
+
+The final 0.2.0 release executable is 1,114,288 bytes and its app bundle is 1,527,125 bytes, approximately 1.46 MiB. A fresh normal menu-bar process with the popover closed used 49,264–49,280 KiB RSS, approximately 48.1 MiB. Four one-second-spaced samples reported 0.0% CPU and unchanged cumulative CPU time. This is a short idle sample, not a hard cap or a physical-footprint measurement. The external browser's authentication cost and active IKEv2 service cost are excluded.
+
 ## Initial measurements
 
 | Measurement | Observed |
@@ -34,6 +48,6 @@ No tunnel was activated during these measurements. Incremental IKEv2 service mem
 
 Perform only when the user separately requests a live test, starting from their working network. Verify actual service-credential authentication, Keychain reference reuse by Apple helpers, native save/start/stop, country/city switching, failed-switch Retry, disconnect, sleep/wake, and network changes. Check actual Tailscale connectivity throughout. Capture results without account secrets or private network identifiers in public logs.
 
-The user completed certificate setup and credential entry during preview. This demonstrates that those UI actions ran locally, not that the entered credentials authenticate or that the tunnel connects. Meridian itself never asks for a Nord Account password; use manual IKEv2 service credentials.
+The user previously completed certificate setup and manual credential entry during preview. Version 0.2.0 additionally completed automatic service-credential import into Keychain. These checks do not prove that Apple helpers can use the saved reference or that the tunnel connects. Meridian itself never asks for a Nord Account password.
 
 Known risks are unsupported private macOS controls, deprecated login-Keychain ACL facilities, and unverified live transition behavior. The app does not implement a kill switch. See [the feasibility record](feasibility-report.md) for the earlier bounded experiment and subsequent connectivity incident.

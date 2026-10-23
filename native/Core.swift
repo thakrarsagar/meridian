@@ -50,17 +50,27 @@ struct FetchResult {
 
 // One bounded system HTTP implementation, shared by catalogue and recommendation requests.
 final class SmallHTTP: NSObject, URLSessionDataDelegate {
+    struct StatusError: LocalizedError {
+        let status: Int
+        var errorDescription: String? { "Nord returned HTTP \(status). Try again later." }
+    }
     private struct Request {
         var data = Data()
         var response: HTTPURLResponse?
+        var failure: Error?
         let limit: Int
         let completion: (Result<FetchResult, Error>) -> Void
     }
     private var requests: [Int: Request] = [:]
     private(set) var requestCount = 0
     private(set) var receivedBytes: Int64 = 0
+    private let configuration: URLSessionConfiguration
+    init(configuration: URLSessionConfiguration = .ephemeral) {
+        self.configuration = configuration
+        super.init()
+    }
     private lazy var session: URLSession = {
-        let config = URLSessionConfiguration.ephemeral
+        let config = configuration
         config.urlCache = nil
         config.httpCookieStorage = nil
         config.urlCredentialStorage = nil
@@ -79,6 +89,13 @@ final class SmallHTTP: NSObject, URLSessionDataDelegate {
         request.setValue("Meridian/0.1", forHTTPHeaderField: "User-Agent")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let modified { request.setValue(modified, forHTTPHeaderField: "If-Modified-Since") }
+        return send(request, limit: limit, completion: completion)
+    }
+
+    @discardableResult
+    func send(_ request: URLRequest, limit: Int = 65_536,
+              completion: @escaping (Result<FetchResult, Error>) -> Void) -> URLSessionDataTask {
+        precondition(request.url?.scheme == "https" && ["api.nordvpn.com", "downloads.nordcdn.com"].contains(request.url?.host))
         let task = session.dataTask(with: request)
         requests[task.taskIdentifier] = Request(limit: limit, completion: completion)
         requestCount += 1
@@ -88,31 +105,41 @@ final class SmallHTTP: NSObject, URLSessionDataDelegate {
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
-        guard let http = response as? HTTPURLResponse, var request = requests[dataTask.taskIdentifier],
-              [200, 304].contains(http.statusCode), response.expectedContentLength <= request.limit else {
-            completionHandler(.cancel)
-            return
+        guard let http = response as? HTTPURLResponse, var request = requests[dataTask.taskIdentifier] else { completionHandler(.cancel); return }
+        if !(200...299).contains(http.statusCode) && http.statusCode != 304 {
+            request.failure = StatusError(status: http.statusCode)
+        } else if response.expectedContentLength > request.limit {
+            request.failure = Credentials.error("Nord's response exceeded the size limit.")
         }
         request.response = http
         requests[dataTask.taskIdentifier] = request
-        completionHandler(.allow)
+        completionHandler(request.failure == nil ? .allow : .cancel)
     }
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         guard var request = requests[dataTask.taskIdentifier] else { return }
-        if request.data.count + data.count > request.limit { dataTask.cancel(); return }
+        if request.data.count + data.count > request.limit {
+            request.failure = Credentials.error("Nord's response exceeded the size limit.")
+            requests[dataTask.taskIdentifier] = request
+            dataTask.cancel(); return
+        }
         request.data.append(data)
         requests[dataTask.taskIdentifier] = request
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
-        completionHandler(request.url?.scheme == "https" && request.url?.host == task.originalRequest?.url?.host ? request : nil)
+        // Account tokens and proof keys must never be forwarded by a redirect.
+        if var pending = requests[task.taskIdentifier] {
+            pending.failure = Credentials.error("Nord returned an unexpected redirect. Sign in again.")
+            requests[task.taskIdentifier] = pending
+        }
+        completionHandler(nil)
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
         receivedBytes += metrics.transactionMetrics.reduce(0) { $0 + $1.countOfResponseBodyBytesReceived }
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard let request = requests.removeValue(forKey: task.taskIdentifier) else { return }
-        if let error { request.completion(.failure(error)) }
+        if let error = request.failure ?? error { request.completion(.failure(error)) }
         else if let response = request.response {
             request.completion(.success(FetchResult(data: request.data, status: response.statusCode,
                 modified: response.value(forHTTPHeaderField: "Last-Modified"))))

@@ -15,3 +15,6 @@ rtk proxy xcrun swiftc -swift-version 5 -O -import-objc-header "$root/native/Bri
   "$root/target/release/libmeridian_core.a" -framework Cocoa -framework Security -framework AuthenticationServices \
   -o "$build_dir/AccountTests"
 rtk proxy "$build_dir/AccountTests"
+rtk proxy xcrun clang -fobjc-arc -fblocks -Os "$root/tests/NativeVPNTests.m" \
+  -framework Foundation -framework NetworkExtension -framework Security -o "$build_dir/NativeVPNTests"
+rtk proxy "$build_dir/NativeVPNTests"

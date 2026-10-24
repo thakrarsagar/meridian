@@ -39,6 +39,8 @@ For a read-only check against Nord's current public metadata, run the same execu
 
 Version 0.2.1 also repairs older Meridian Keychain entries that omitted Apple's IKEv2 password reader. The repair runs on a requested connection, preserves the credential reference and existing access rules, and skips writes once access is correct. It does not require another Nord Account sign-in. A live connection must still confirm that the repeated VPN password dialog is resolved.
 
+Version 0.2.2 fixes the stale-profile save error on existing configurations. The saving manager reloads the profile and its revision after authorization, then validates ownership again before updating it. The app retains the existing profile identity and Keychain reference.
+
 A selected location is a request. Meridian displays Connected only after the native session reports it. A failed switch keeps the requested location and offers Retry. Cancel and Disconnect invalidate pending requests. Reconnection attempts use backoff after an established connection drops, while Meridian remains open; the app does not connect merely because it launches.
 
 Quitting leaves the current VPN as it is and stops the app's automatic reconnects. Disconnect explicitly before quitting if you want the tunnel stopped.

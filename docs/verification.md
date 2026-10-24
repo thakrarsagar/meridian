@@ -35,6 +35,16 @@ The read-policy regression check failed before adding that process. It now check
 
 The updated app repairs an older entry at the next requested connection, before handing its reference to native VPN controls. Verification did not start or stop a tunnel, change a saved VPN profile, or modify the real entry's policy. An actual connection is still required to confirm that this resolves the dialog; the access defect alone does not rule out a further native credential lookup or server-authentication issue.
 
+## Existing-profile save, version 0.2.2
+
+The user's next attempt did not display the password dialog, but reported a stale configuration. Native logs placed this failure at profile Save, before tunnel Start. This therefore does not establish that password reuse works during IKEv2 authentication.
+
+A read-only probe confirmed that separate native configuration managers have separate caches: the manager that loaded profiles had a revision index and loaded configurations; a newly created writer had neither. The old Connect path read with the first manager and saved with the second.
+
+An offline test of the production Connect method reproduced this pattern with an adapter that rejects existing-profile saves from an unloaded writer. It failed before the fix and passed after the writer was changed to load and validate the current owned profile after authorization. An essential failure case confirms that an ownership conflict after authorization reaches neither Save nor Start. The test uses process-only defaults and in-process platform adapters, with no system configuration, authorization, session, Keychain, network, or persistent-preference operations.
+
+Rust checks, optimized native compilation, signature verification, account/access-policy checks, and the native save regression pass. Live save/start and tunnel authentication still require a user connection attempt. Verification did not recreate or modify a VPN profile.
+
 ## Initial measurements
 
 | Measurement | Observed |

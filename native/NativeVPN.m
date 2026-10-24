@@ -77,6 +77,10 @@ static NSError *failure(NSString *message) {
 
 - (BOOL)available { return _available; }
 
+- (NEConfigurationManager *)newConfigurationManager {
+    return [NSClassFromString(@"NEConfigurationManager") new];
+}
+
 - (BOOL)owns:(NEConfiguration *)configuration identifier:(NSString *)identifier {
     return identifier.length && [configuration.identifier.UUIDString isEqualToString:identifier]
         && [configuration.application isEqualToString:NSBundle.mainBundle.bundleIdentifier]
@@ -89,9 +93,13 @@ static NSError *failure(NSString *message) {
     if (!identifier) { completion(nil, nil); return; }
     if (!_available) { completion(nil, failure(@"This macOS version does not support Meridian's native VPN controls.")); return; }
     // A fresh manager avoids accepting the stale list observed in the feasibility test.
-    NEConfigurationManager *reader = [NSClassFromString(@"NEConfigurationManager") new];
-    [reader loadConfigurationsWithCompletionQueue:dispatch_get_main_queue() handler:^(NSArray *configurations, NSError *error) {
-        (void)reader;
+    [self loadOwnedUsing:[self newConfigurationManager] completion:completion];
+}
+
+- (void)loadOwnedUsing:(NEConfigurationManager *)manager completion:(void (^)(NEConfiguration *, NSError *))completion {
+    NSString *identifier = [NSUserDefaults.standardUserDefaults stringForKey:@"vpnIdentifier"];
+    [manager loadConfigurationsWithCompletionQueue:dispatch_get_main_queue() handler:^(NSArray *configurations, NSError *error) {
+        (void)manager;
         if (error) { completion(nil, error); return; }
         for (NEConfiguration *configuration in configurations) {
             if ([configuration.identifier.UUIDString isEqualToString:identifier]) {
@@ -272,37 +280,43 @@ static NSError *failure(NSString *message) {
             if (stopError) { self->_suppressStatus = NO; completion(stopError); return; }
             NSError *authError = nil;
             if (![self authorize:&authError]) { self->_suppressStatus = NO; completion(authError); return; }
-            NEConfiguration *owned = configuration;
-            if (!owned) {
-                owned = [[NSClassFromString(@"NEConfiguration") alloc] initWithName:@"Meridian" grade:2];
-                owned.application = NSBundle.mainBundle.bundleIdentifier;
-                owned.applicationName = @"Meridian";
-                // Persist identity before saving, so an interrupted first save cannot orphan ownership.
-                [NSUserDefaults.standardUserDefaults setObject:owned.identifier.UUIDString forKey:@"vpnIdentifier"];
-            }
-            NEVPNProtocolIKEv2 *protocol = [NEVPNProtocolIKEv2 new];
-            protocol.serverAddress = host;
-            protocol.remoteIdentifier = host;
-            protocol.username = username;
-            protocol.passwordReference = reference;
-            protocol.authenticationMethod = NEVPNIKEAuthenticationMethodNone;
-            protocol.useExtendedAuthentication = YES;
-            protocol.disconnectOnSleep = NO;
-            protocol.includeAllNetworks = NO;
-            protocol.enforceRoutes = NO;
-            protocol.excludeLocalNetworks = YES;
-            NEVPN *vpn = [NSClassFromString(@"NEVPN") new];
-            vpn.protocol = protocol;
-            vpn.enabled = YES;
-            vpn.onDemandEnabled = NO;
-            vpn.disconnectOnDemandEnabled = NO;
-            owned.VPN = vpn;
-            self->_writer = [NSClassFromString(@"NEConfigurationManager") new];
-            [self->_writer setAuthorization:self->_authorization];
-            [self->_writer saveConfiguration:owned withCompletionQueue:dispatch_get_main_queue() handler:^(NSError *saveError) {
+            NEConfigurationManager *writer = [self newConfigurationManager];
+            self->_writer = writer;
+            [writer setAuthorization:self->_authorization];
+            // Revision state belongs to the manager. Reload after authorization, then save with that same manager.
+            [self loadOwnedUsing:writer completion:^(NEConfiguration *latest, NSError *loadError) {
                 if (operation != self->_operation) return;
-                if (saveError) { self->_suppressStatus = NO; self->_writer = nil; completion(saveError); return; }
-                [self verifyHost:host reference:reference operation:operation attempts:12 completion:completion];
+                if (loadError) { self->_suppressStatus = NO; self->_writer = nil; completion(loadError); return; }
+                NEConfiguration *owned = latest;
+                if (!owned) {
+                    owned = [[NSClassFromString(@"NEConfiguration") alloc] initWithName:@"Meridian" grade:2];
+                    owned.application = NSBundle.mainBundle.bundleIdentifier;
+                    owned.applicationName = @"Meridian";
+                    // Persist identity before saving, so an interrupted first save cannot orphan ownership.
+                    [NSUserDefaults.standardUserDefaults setObject:owned.identifier.UUIDString forKey:@"vpnIdentifier"];
+                }
+                NEVPNProtocolIKEv2 *protocol = [NEVPNProtocolIKEv2 new];
+                protocol.serverAddress = host;
+                protocol.remoteIdentifier = host;
+                protocol.username = username;
+                protocol.passwordReference = reference;
+                protocol.authenticationMethod = NEVPNIKEAuthenticationMethodNone;
+                protocol.useExtendedAuthentication = YES;
+                protocol.disconnectOnSleep = NO;
+                protocol.includeAllNetworks = NO;
+                protocol.enforceRoutes = NO;
+                protocol.excludeLocalNetworks = YES;
+                NEVPN *vpn = [NSClassFromString(@"NEVPN") new];
+                vpn.protocol = protocol;
+                vpn.enabled = YES;
+                vpn.onDemandEnabled = NO;
+                vpn.disconnectOnDemandEnabled = NO;
+                owned.VPN = vpn;
+                [writer saveConfiguration:owned withCompletionQueue:dispatch_get_main_queue() handler:^(NSError *saveError) {
+                    if (operation != self->_operation) return;
+                    if (saveError) { self->_suppressStatus = NO; self->_writer = nil; completion(saveError); return; }
+                    [self verifyHost:host reference:reference operation:operation attempts:12 completion:completion];
+                }];
             }];
         }];
     }];

@@ -41,6 +41,8 @@ Version 0.2.1 also repairs older Meridian Keychain entries that omitted Apple's 
 
 Version 0.2.2 fixes the stale-profile save error on existing configurations. The saving manager reloads the profile and its revision after authorization, then validates ownership again before updating it. The app retains the existing profile identity and Keychain reference.
 
+Version 0.2.3 supplies the saved IKEv2 credential through Apple's per-start password option. The native adapter reads it from Keychain only when starting a requested connection. A failed Keychain read prevents Start, and subsequent Disconnected events preserve the detailed error. This addresses the missing-password handoff found in the next live attempt; successful tunnel authentication still needs live confirmation.
+
 A selected location is a request. Meridian displays Connected only after the native session reports it. A failed switch keeps the requested location and offers Retry. Cancel and Disconnect invalidate pending requests. Reconnection attempts use backoff after an established connection drops, while Meridian remains open; the app does not connect merely because it launches.
 
 Quitting leaves the current VPN as it is and stops the app's automatic reconnects. Disconnect explicitly before quitting if you want the tunnel stopped.

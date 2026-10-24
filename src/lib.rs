@@ -277,7 +277,9 @@ impl Core {
                                     extra["effect"] = json!("resume_later");
                                 } else {
                                     self.state.phase = Phase::Failed;
-                                    self.state.error = Some("Nord did not connect. Check service credentials and the Nord certificate, then Retry.".into());
+                                    if self.state.error.is_none() {
+                                        self.state.error = Some("Nord did not connect. Check service credentials and the Nord certificate, then Retry.".into());
+                                    }
                                 }
                             }
                         }
@@ -493,6 +495,12 @@ mod tests {
         })
         .unwrap();
         assert_eq!(c.state.requested.as_ref().unwrap().city_id, Some(1));
+        c.run(Command::Status {
+            generation: 2,
+            status: 1,
+        })
+        .unwrap();
+        assert_eq!(c.state.error.as_deref(), Some("Failed"));
         assert_eq!(
             c.run(Command::Recommendation {
                 generation: 2,

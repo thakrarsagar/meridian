@@ -45,6 +45,20 @@ An offline test of the production Connect method reproduced this pattern with an
 
 Rust checks, optimized native compilation, signature verification, account/access-policy checks, and the native save regression pass. Live save/start and tunnel authentication still require a user connection attempt. Verification did not recreate or modify a VPN profile.
 
+## Per-start credentials, version 0.2.3
+
+The next user connection attempt passed Save and launched Apple's IKEv2 provider. The provider then reported that no password was entered, followed by an authentication failure. This confirms that the stale-save fix reached Start; it does not establish that Nord rejected an actual credential or certificate. Read-only policy inspection also found that the saved entry no longer needed the earlier reader repair.
+
+The adapter now reads the saved password only at a requested Start and supplies Apple's username/password override keys through the session's XPC options. The profile identity, persistent credential reference, and credential storage are retained. A denied Keychain read fails before Start. A generation check prevents starting a superseded request if Keychain authorization processes another user action.
+
+The native regression first failed because Start supplied no credential options. It now passes through production Connect with dummy Keychain data and a recording session adapter. It also verifies that denied access and cancellation during a credential read reach no Start. No real Keychain query, authorization, profile write, or session action occurs in these tests.
+
+A separate Rust regression reproduced a later Disconnected event overwriting the specific native failure. It failed before the error-retention change and now passes. Formatting, all three Rust tests, Clippy, optimized native compilation, signature verification, the offline self-check, account/access-policy checks, and native regressions pass.
+
+Live provider acceptance and removal of the repeated password dialog remain unconfirmed. Development verification did not start or stop a VPN or change network or Tailscale settings.
+
+The 0.2.3 release executable is 1,134,128 bytes and the app bundle is 1,546,965 bytes, approximately 1.48 MiB. The installed executable and ZIP matched the checked candidate. A fresh menu-bar process with its popover closed used 36,976 KiB RSS, approximately 36.1 MiB, in four one-second-spaced samples. CPU was 0.0% and cumulative CPU time was unchanged. This excludes browser sign-in and active IKEv2 service cost; it is a short idle observation rather than a hard budget or a comparison under the same workload as earlier releases.
+
 ## Initial measurements
 
 | Measurement | Observed |

@@ -1,7 +1,9 @@
 #import "Bridge.h"
 #import <NetworkExtension/NetworkExtension.h>
+#import <Security/Security.h>
 #import <Security/Authorization.h>
 #import <dlfcn.h>
+#import <xpc/xpc.h>
 
 // Unsupported macOS declarations stay in this file. Never bypass authorization.
 @interface NEVPN : NSObject
@@ -27,6 +29,7 @@
 typedef void *Session;
 typedef Session (*CreateSession)(const unsigned char *, int);
 typedef void (*SessionAction)(Session);
+typedef void (*SessionStart)(Session, xpc_object_t);
 typedef void (*SessionStatus)(Session, dispatch_queue_t, void (^)(int));
 typedef void (*SessionEvents)(Session, dispatch_queue_t, void (^)(int, void *));
 
@@ -36,7 +39,8 @@ static NSError *failure(NSString *message) {
 
 @implementation NativeVPN {
     CreateSession _create;
-    SessionAction _start, _stop, _cancel, _release;
+    SessionAction _stop, _cancel, _release, _barrier;
+    SessionStart _start;
     SessionStatus _getStatus;
     SessionEvents _setEvents;
     Session _session;
@@ -62,14 +66,15 @@ static NSError *failure(NSString *message) {
         void *library = dlopen("/usr/lib/system/libsystem_networkextension.dylib", RTLD_LAZY | RTLD_LOCAL);
         if (library) {
             _create = (CreateSession)dlsym(library, "ne_session_create");
-            _start = (SessionAction)dlsym(library, "ne_session_start");
+            _start = (SessionStart)dlsym(library, "ne_session_start_with_options");
+            _barrier = (SessionAction)dlsym(library, "ne_session_send_barrier");
             _stop = (SessionAction)dlsym(library, "ne_session_stop");
             _cancel = (SessionAction)dlsym(library, "ne_session_cancel");
             _release = (SessionAction)dlsym(library, "ne_session_release");
             _getStatus = (SessionStatus)dlsym(library, "ne_session_get_status");
             _setEvents = (SessionEvents)dlsym(library, "ne_session_set_event_handler");
         }
-        _available &= _create && _start && _stop && _cancel && _release && _getStatus && _setEvents;
+        _available &= _create && _start && _barrier && _stop && _cancel && _release && _getStatus && _setEvents;
         _status = 1;
     }
     return self;
@@ -222,6 +227,37 @@ static NSError *failure(NSString *message) {
     return YES;
 }
 
+- (void)sendStartOptions:(xpc_object_t)options {
+    _start(_session, options);
+    _barrier(_session);
+}
+
+- (BOOL)startSessionWithProtocol:(NEVPNProtocolIKEv2 *)protocol operation:(NSUInteger)operation error:(NSError **)error {
+    NSDictionary *query = @{(__bridge id)kSecClass:(__bridge id)kSecClassGenericPassword,
+        (__bridge id)kSecValuePersistentRef:protocol.passwordReference,
+        (__bridge id)kSecReturnData:@YES, (__bridge id)kSecMatchLimit:(__bridge id)kSecMatchLimitOne};
+    CFTypeRef result = NULL;
+    OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &result);
+    NSData *data = CFBridgingRelease(result);
+    // Keychain authorization can run a nested event loop; a newer request must win.
+    if (operation != _operation) { *error = failure(@"Connection request cancelled."); return NO; }
+    if (status != errSecSuccess) {
+        *error = failure(@"Meridian could not read the saved IKEv2 password from Keychain. Unlock your login Keychain and allow Meridian access, or sign in again in Settings, then Retry.");
+        return NO;
+    }
+    NSString *password = [data isKindOfClass:[NSData class]] && data.length > 0 && data.length <= 1024
+        && !memchr(data.bytes, 0, data.length) ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+    if (!password.length) {
+        *error = failure(@"The saved IKEv2 password is invalid. Sign in again in Settings, then Retry.");
+        return NO;
+    }
+    xpc_object_t options = xpc_dictionary_create(NULL, NULL, 0);
+    xpc_dictionary_set_string(options, NEVPNConnectionStartOptionUsername.UTF8String, protocol.username.UTF8String);
+    xpc_dictionary_set_string(options, NEVPNConnectionStartOptionPassword.UTF8String, password.UTF8String);
+    [self sendStartOptions:options];
+    return YES;
+}
+
 - (void)verifyHost:(NSString *)host reference:(NSData *)reference operation:(NSUInteger)operation attempts:(NSInteger)attempts completion:(void (^)(NSError *))completion {
     if (operation != _operation) return;
     [self loadOwned:^(NEConfiguration *configuration, NSError *error) {
@@ -248,7 +284,14 @@ static NSError *failure(NSString *message) {
         self->_sawProgress = NO;
         self->_connected = [completion copy];
         if (self.statusChanged) self.statusChanged(2);
-        self->_start(self->_session);
+        NSError *startError = nil;
+        if (![self startSessionWithProtocol:protocol operation:operation error:&startError]) {
+            if (operation != self->_operation) return;
+            self->_starting = NO;
+            self->_connected = nil;
+            completion(startError);
+            return;
+        }
         [self refresh];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 45 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
             if (operation != self->_operation || !self->_starting) return;

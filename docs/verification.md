@@ -69,6 +69,14 @@ The app uses NSOutlineView with no added dependency. Credential handoff, VPN con
 
 The public build scripts and CI no longer require the agent's command wrapper. The complete build and offline check script passed with `rtk` absent from its PATH, using only the rustup toolchain and system command-line tools. This changed build tooling and documentation; the running app and VPN session were not replaced or controlled.
 
+## Downloadable preview, version 0.2.4
+
+The Apple Silicon release was built in a separate output directory with the complete offline check script. Rust compiler source paths were remapped with `RUSTFLAGS=--remap-path-prefix=<cargo-home>=cargo`; no runtime code changed. Binary scans found no local machine paths, private tailnet addresses, email addresses, or credential-like token patterns. Linked runtime dependencies are Apple's system libraries and frameworks.
+
+The ZIP contains Meridian.app and archive metadata only. It is 818,126 bytes. Extraction passed the ZIP CRC check, and the extracted app passed strict signature verification and the offline native self-check. Architecture inspection reports arm64; the bundle version is 0.2.4 and the deployment target is macOS 14.0. The asset's SHA-256 is provided in SHA256SUMS.txt.
+
+Gatekeeper assessment rejected the ad-hoc-signed app. This preview is not notarized and must not be described as passing Gatekeeper. Installation notes link to Apple's guidance for an app-specific first-launch exception; a fresh browser-downloaded first launch on another Mac has not been verified. Intel and cross-version compatibility remain untested. The development Mac's running app, VPN session, certificate trust, network, and Tailscale settings were not changed during packaging.
+
 ## Initial measurements
 
 | Measurement | Observed |

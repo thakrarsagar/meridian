@@ -6,9 +6,19 @@ Meridian is an independent, unofficial project. It requires an active NordVPN su
 
 ## Current status
 
-This is an early local build. Nord Account sign-in and automatic Keychain import have passed a live check on the development Mac. The catalogue, Rust state transitions, native compilation, and offline checks also pass. Authenticated VPN activation, location switching, and coexistence with Tailscale still require a separate live test. Do not treat a successful sign-in as proof of those behaviors.
+This is an early preview with a downloadable Apple Silicon app. Nord Account sign-in and automatic Keychain import passed a live check on the development Mac. The user confirmed VPN connections and seamless location switching. Independent Tailscale reachability across switching, sleep/wake, and network changes remains unverified. The catalogue, Rust state transitions, native compilation, and offline checks pass.
 
 The no-paid-signing implementation uses private macOS configuration and session controls with ordinary OS authorization. It does not install a helper or weaken system security. These unsupported interfaces can change after a macOS update. The documented minimum deployment target is macOS 14; runtime availability is checked, but OS compatibility must be tested individually.
+
+## Download and install
+
+Download [Meridian 0.2.4 for Apple Silicon](https://github.com/thakrarsagar/meridian/releases/download/v0.2.4/Meridian-v0.2.4-macOS-arm64.zip) from the [GitHub release](https://github.com/thakrarsagar/meridian/releases/tag/v0.2.4). Running the app does not require Rust, Apple's Command Line Tools, or any command wrapper.
+
+1. Unzip the download and move `Meridian.app` to Applications.
+2. Open Meridian. This preview is ad-hoc signed and **not notarized**. macOS may block its first launch. Review [Apple's guidance for unidentified developers](https://support.apple.com/en-us/102445) before deciding whether to allow it. If you choose to proceed, use the app-specific **Open Anyway** action in System Settings > Privacy & Security after the first launch attempt. Managed Macs may not permit this.
+3. Open Meridian's menu-bar icon, then Settings, and complete the Nord Account and certificate setup described below. A NordVPN subscription is required.
+
+The binary is ARM64 for Apple Silicon and targets macOS 14 or later. Live testing has only covered one Apple Silicon Mac running macOS 26.5.2. There is no Intel download yet. The release includes `SHA256SUMS.txt` for checking download integrity. No kill switch is implemented; read the connection behavior below before use.
 
 ## Build
 

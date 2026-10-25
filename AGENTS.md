@@ -17,5 +17,6 @@ Read `CONTEXT.md` for domain language and `docs/architecture.md` before changing
 - Keep errors actionable and connection status truthful. A requested location is distinct from a confirmed connection. A failed switch retains the request and offers Retry.
 - Prefix agent-issued shell commands with `rtk`; use `rtk proxy` for unfiltered commands. Keep public build scripts and CI independent of agent tooling. Build and check with the scripts under `scripts/`. Run Rust tests and the offline native self-check for behavior changes.
 - Keep public files free of credentials, local network identifiers, machine paths, logs, and diagnostic scratch files. Commit the lockfile; exclude build products and caches.
+- Before publishing an app, scan the binary as well as source for local paths and secrets. Verify the extracted archive, label its architecture, publish a checksum, and state signing/notarization and tested OS limits accurately.
 
 Before adding a dependency or module, explain which existing platform facility cannot meet the requirement. Measure release memory and CPU rather than claiming a footprint from language choice.

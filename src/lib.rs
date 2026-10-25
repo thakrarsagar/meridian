@@ -13,6 +13,7 @@ struct Location {
     city_id: Option<u64>,
     country: String,
     city: Option<String>,
+    single_city: Option<String>,
     code: String,
 }
 
@@ -135,6 +136,8 @@ impl Core {
                         city_id: None,
                         country: country.name,
                         city: None,
+                        single_city: (country.cities.len() == 1)
+                            .then(|| country.cities[0].name.clone()),
                         code: country.code,
                     };
                     locations.push(location.clone());
@@ -145,11 +148,13 @@ impl Core {
                         {
                             return Err("Nord returned an invalid city.".into());
                         }
-                        locations.push(Location {
-                            city_id: Some(city.id),
-                            city: Some(city.name),
-                            ..location.clone()
-                        });
+                        if location.single_city.is_none() {
+                            locations.push(Location {
+                                city_id: Some(city.id),
+                                city: Some(city.name),
+                                ..location.clone()
+                            });
+                        }
                     }
                 }
                 locations.sort_by(|a, b| a.country.cmp(&b.country).then(a.city.cmp(&b.city)));
@@ -168,7 +173,7 @@ impl Core {
                             let text = format!(
                                 "{} {} {}",
                                 l.country,
-                                l.city.as_deref().unwrap_or(""),
+                                l.city.as_deref().or(l.single_city.as_deref()).unwrap_or(""),
                                 l.code
                             )
                             .to_lowercase();
@@ -384,7 +389,7 @@ mod tests {
     use super::*;
     fn core() -> Core {
         let mut c = Core::default();
-        assert!(c.dispatch(r#"{"op":"catalogue","payload":[{"id":81,"name":"Germany","code":"DE","cities":[{"id":1,"name":"Berlin"}]}]}"#)["ok"] == true);
+        assert!(c.dispatch(r#"{"op":"catalogue","payload":[{"id":81,"name":"Germany","code":"DE","cities":[{"id":1,"name":"Berlin"},{"id":2,"name":"Munich"}]}]}"#)["ok"] == true);
         c
     }
     fn server() -> Value {
@@ -521,9 +526,57 @@ mod tests {
         assert!(!c.state.wanted);
     }
     #[test]
+    fn single_city_countries_have_one_searchable_option() {
+        let mut c = core();
+        c.run(Command::Catalogue {
+            payload: json!([
+                {"id":1,"name":"Singapore","code":"SG","cities":[{"id":10,"name":"Singapore"}]},
+                {"id":2,"name":"Ireland","code":"IE","cities":[{"id":20,"name":"Dublin"}]},
+                {"id":3,"name":"United Kingdom","code":"GB","cities":[{"id":30,"name":"London"},{"id":31,"name":"Manchester"}]}
+            ]),
+        })
+        .unwrap();
+        let singapore = c
+            .run(Command::Search {
+                query: "Singapore".into(),
+            })
+            .unwrap();
+        assert_eq!(singapore["locations"].as_array().unwrap().len(), 1);
+        assert!(singapore["locations"][0]["city_id"].is_null());
+        assert_eq!(singapore["locations"][0]["single_city"], "Singapore");
+        let dublin = c
+            .run(Command::Search {
+                query: "dub ie".into(),
+            })
+            .unwrap();
+        assert_eq!(dublin["locations"].as_array().unwrap().len(), 1);
+        assert_eq!(dublin["locations"][0]["country"], "Ireland");
+        assert!(dublin["locations"][0]["city_id"].is_null());
+        let uk = c
+            .run(Command::Search {
+                query: "United Kingdom".into(),
+            })
+            .unwrap();
+        let choices = uk["locations"].as_array().unwrap();
+        assert_eq!(choices.len(), 3);
+        assert!(choices[0]["city_id"].is_null());
+        assert_eq!(choices[1]["city"], "London");
+        assert_eq!(choices[2]["city"], "Manchester");
+        let request = c
+            .run(Command::Connect {
+                country_id: 2,
+                city_id: None,
+            })
+            .unwrap();
+        assert!(!request["url"].as_str().unwrap().contains("city_id"));
+    }
+    #[test]
     fn invalid_refresh_preserves_catalogue() {
         let mut c = core();
         assert!(c.run(Command::Catalogue { payload: json!([]) }).is_err());
-        assert_eq!(c.locations.len(), 2);
+        assert!(c.run(Command::Catalogue {
+            payload: json!([{"id":1,"name":"Ireland","code":"IE","cities":[{"id":20,"name":"\n"}]}])
+        }).is_err());
+        assert_eq!(c.locations.len(), 3);
     }
 }

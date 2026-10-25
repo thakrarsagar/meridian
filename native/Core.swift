@@ -5,8 +5,10 @@ struct Location: Codable, Equatable {
     let city_id: Int?
     let country: String
     let city: String?
+    let single_city: String?
     let code: String
-    var title: String { city.map { "\($0), \(country)" } ?? country }
+    var title: String { city.map { "\($0), \(country)" } ?? (single_city == nil ? "\(country) · Any city" : country) }
+    var subtitle: String { city != nil ? "\(country) · City" : single_city == nil ? "Any city · Recommended server" : "Recommended server" }
     var flag: String { String(String.UnicodeScalarView(code.unicodeScalars.compactMap { UnicodeScalar(127397 + $0.value) })) }
 }
 

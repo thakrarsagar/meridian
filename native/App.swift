@@ -222,19 +222,36 @@ final class LocationCell: NSTableCellView {
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
-    func set(_ location: Location) {
+    func set(_ location: Location, isChild: Bool) {
         flag.stringValue = location.flag
-        title.stringValue = location.city ?? location.country
-        detail.stringValue = location.city == nil ? "Fastest available" : location.country
-        setAccessibilityLabel("\(location.title), \(location.city == nil ? "fastest available" : "city")")
+        title.stringValue = isChild && location.city == nil ? "Any city" : location.city ?? location.country
+        detail.stringValue = isChild && location.city == nil ? "Recommended server" : location.subtitle
+        setAccessibilityLabel("\(title.stringValue), \(detail.stringValue)")
     }
 }
 
-final class PopoverController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
+// NSOutlineView needs stable object identities for its country and city items.
+final class LocationItem: NSObject {
+    let location: Location
+    let children: [LocationItem]
+    init(_ location: Location, children: [LocationItem] = []) {
+        self.location = location; self.children = children
+    }
+    static func countries(from all: [Location], matching matches: [Location]) -> [LocationItem] {
+        let ids = Set(matches.map(\.country_id))
+        let cities = Dictionary(grouping: matches.filter { $0.city_id != nil }, by: \.country_id)
+        return all.filter { $0.city_id == nil && ids.contains($0.country_id) }.map { country in
+            let choices = cities[country.country_id] ?? []
+            return LocationItem(country, children: choices.isEmpty ? [] : [LocationItem(country)] + choices.map { LocationItem($0) })
+        }
+    }
+}
+
+final class PopoverController: NSViewController, NSOutlineViewDataSource, NSOutlineViewDelegate, NSSearchFieldDelegate {
     let model: AppModel
     var showSettings: (() -> Void)?
     let search = NSSearchField()
-    private let table = NSTableView()
+    private let table = NSOutlineView()
     private let headline = Style.label("Disconnected", size: 23, weight: .semibold)
     private let statusIcon = NSImageView()
     private let detail = Style.label("Your regular connection is in use.", size: 12, color: .secondaryLabelColor)
@@ -244,7 +261,9 @@ final class PopoverController: NSViewController, NSTableViewDataSource, NSTableV
     private let summary = Style.label("Loading locations", size: 11, color: .secondaryLabelColor)
     private let empty = Style.label("Loading locations…", size: 13, color: .secondaryLabelColor)
     private let refresh = NSButton()
-    private var rows: [Location] = []
+    private var countries: [LocationItem] = []
+    private var expandedCountries: Set<Int> = []
+    private var previousQuery = ""
     private var selected: Location?
     private var rendering = false
 
@@ -279,6 +298,8 @@ final class PopoverController: NSViewController, NSTableViewDataSource, NSTableV
         let separator = NSBox(); separator.boxType = .separator
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("location"))
         table.addTableColumn(column); table.headerView = nil; table.rowHeight = Style.rowHeight
+        table.outlineTableColumn = column
+        table.indentationPerLevel = 16
         table.intercellSpacing = NSSize(width: 0, height: 2); table.backgroundColor = .clear
         table.style = .plain; table.selectionHighlightStyle = .regular
         table.dataSource = self; table.delegate = self
@@ -347,39 +368,70 @@ final class PopoverController: NSViewController, NSTableViewDataSource, NSTableV
         stop.title = busy && state.phase != "disconnecting" ? "Cancel" : "Disconnect"
         stop.isEnabled = state.phase != "disconnecting"
         let previous = selected
-        rows = model.core.search(search.stringValue)
+        let previousItem = table.selectedRow >= 0 ? table.item(atRow: table.selectedRow) : nil
+        let previousIsChild = previousItem.map { table.parent(forItem: $0) != nil } ?? false
+        let all = model.core.search("")
+        let matches = model.core.search(search.stringValue)
+        countries = LocationItem.countries(from: all, matching: matches)
+        if search.stringValue != previousQuery && !search.stringValue.isEmpty {
+            expandedCountries.formUnion(countries.filter { !$0.children.isEmpty }.map { $0.location.country_id })
+        }
+        previousQuery = search.stringValue
         rendering = true
         table.reloadData()
-        if let previous, let index = rows.firstIndex(of: previous) {
+        for country in countries where expandedCountries.contains(country.location.country_id) {
+            table.expandItem(country)
+        }
+        if let previous, let index = (0..<table.numberOfRows).first(where: { row in
+            guard let item = table.item(atRow: row) as? LocationItem else { return false }
+            return item.location == previous && (table.parent(forItem: item) != nil) == previousIsChild
+        }) {
             table.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
         } else { table.deselectAll(nil) }
         rendering = false
-        let all = model.core.search("")
         if model.fetching { summary.stringValue = "Refreshing locations…" }
         else if search.stringValue.isEmpty {
-            summary.stringValue = "\(all.filter { $0.city_id == nil }.count) countries · \(all.filter { $0.city_id != nil }.count) cities"
-        } else { summary.stringValue = "\(rows.count) matching locations" }
+            summary.stringValue = "\(all.filter { $0.city_id == nil }.count) countries · \(all.filter { $0.city != nil || $0.single_city != nil }.count) cities"
+        } else { summary.stringValue = "\(countries.count) matching \(countries.count == 1 ? "country" : "countries")" }
         refresh.isEnabled = !model.fetching
-        empty.isHidden = !rows.isEmpty
+        empty.isHidden = !countries.isEmpty
         empty.stringValue = model.fetching ? "Loading locations…" : all.isEmpty ? "Refresh to load locations" : "No matching locations"
     }
-    func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
-    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let identifier = NSUserInterfaceItemIdentifier("cell")
-        let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? LocationCell ?? LocationCell(frame: .zero)
-        cell.identifier = identifier; cell.set(rows[row]); return cell
+    func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
+        ((item as? LocationItem)?.children ?? countries).count
     }
-    func tableViewSelectionDidChange(_ notification: Notification) {
-        guard !rendering, table.selectedRow >= 0, table.selectedRow < rows.count else { return }
-        selected = rows[table.selectedRow]
+    func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
+        ((item as? LocationItem)?.children ?? countries)[index]
+    }
+    func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
+        !(item as! LocationItem).children.isEmpty
+    }
+    func outlineView(_ outlineView: NSOutlineView, shouldExpandItem item: Any) -> Bool {
+        if !rendering { expandedCountries.insert((item as! LocationItem).location.country_id) }
+        return true
+    }
+    func outlineView(_ outlineView: NSOutlineView, shouldCollapseItem item: Any) -> Bool {
+        if !rendering { expandedCountries.remove((item as! LocationItem).location.country_id) }
+        return true
+    }
+    func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
+        let identifier = NSUserInterfaceItemIdentifier("cell")
+        let cell = outlineView.makeView(withIdentifier: identifier, owner: self) as? LocationCell ?? LocationCell(frame: .zero)
+        cell.identifier = identifier
+        cell.set((item as! LocationItem).location, isChild: outlineView.parent(forItem: item) != nil)
+        return cell
+    }
+    func outlineViewSelectionDidChange(_ notification: Notification) {
+        guard !rendering, table.selectedRow >= 0, let item = table.item(atRow: table.selectedRow) as? LocationItem else { return }
+        selected = item.location
         render()
     }
     func controlTextDidChange(_ obj: Notification) { render() }
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         if commandSelector == #selector(NSResponder.moveDown(_:)) || commandSelector == #selector(NSResponder.moveUp(_:)) {
-            guard !rows.isEmpty else { return true }
+            guard table.numberOfRows > 0 else { return true }
             let delta = commandSelector == #selector(NSResponder.moveDown(_:)) ? 1 : -1
-            let index = max(0, min(rows.count - 1, table.selectedRow + delta))
+            let index = max(0, min(table.numberOfRows - 1, table.selectedRow + delta))
             table.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
             table.scrollRowToVisible(index); return true
         }
@@ -665,11 +717,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 private func selfCheck() -> Int32 {
     let core = Core()
-    let catalogue: [[String: Any]] = [["id": 81, "name": "Germany", "code": "DE", "cities": [["id": 1, "name": "Berlin"]]]]
+    let catalogue: [[String: Any]] = [
+        ["id": 81, "name": "Germany", "code": "DE", "cities": [["id": 1, "name": "Berlin"], ["id": 2, "name": "Munich"]]],
+        ["id": 195, "name": "Singapore", "code": "SG", "cities": [["id": 3, "name": "Singapore"]]]
+    ]
     guard core.call(["op": "catalogue", "payload": catalogue])["ok"] as? Bool == true,
-          core.search("ber de").count == 1, core.state.phase == "disconnected" else { return 1 }
+          core.search("ber de").count == 1, core.state.phase == "disconnected",
+          core.search("sg").count == 1, core.search("sg").first?.subtitle == "Recommended server",
+          core.search("Germany").first?.title == "Germany · Any city",
+          core.search("Germany").first?.subtitle == "Any city · Recommended server",
+          core.search("ber de").first?.subtitle == "Germany · City" else { return 1 }
+    let countries = LocationItem.countries(from: core.search(""), matching: core.search(""))
+    let citySearch = LocationItem.countries(from: core.search(""), matching: core.search("ber de"))
+    guard countries.count == 2, countries[0].children.count == 3, countries[1].children.isEmpty,
+          countries[0].children.first?.location.city == nil,
+          citySearch.count == 1, citySearch[0].location.country == "Germany",
+          citySearch[0].children.count == 2, citySearch[0].children[1].location.city == "Berlin" else { return 1 }
     let native = NativeVPN()
-    print("PASS: Rust FFI, catalogue, search, initial disconnected state; native controls available=\(native.available). No VPN, Keychain, trust, or network writes.")
+    print("PASS: Rust FFI, catalogue, search, country/city hierarchy, initial disconnected state; native controls available=\(native.available). No VPN, Keychain, trust, or network writes.")
     return 0
 }
 
@@ -699,7 +764,7 @@ private func checkCatalogue() {
                             let refreshed = try conditional.get()
                             guard refreshed.status == 304 || refreshed.status == 200 else { throw Credentials.error("Conditional fetch failed.") }
                             let metrics: [String: Any] = ["countries": locations.filter { $0.city_id == nil }.count,
-                                "cities": locations.filter { $0.city_id != nil }.count, "catalogue_decoded_bytes": response.data.count,
+                                "cities": locations.filter { $0.city != nil || $0.single_city != nil }.count, "catalogue_decoded_bytes": response.data.count,
                                 "recommendation_decoded_bytes": server.data.count, "conditional_status": refreshed.status,
                                 "requests": http.requestCount, "transferred_body_bytes": http.receivedBytes,
                                 "vpn_operations": 0]

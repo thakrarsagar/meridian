@@ -10,6 +10,10 @@ The caller serializes calls on the main thread and frees each returned string on
 
 Tests use this same command implementation rather than mocking its private parsing or state fields. A catalogue update is transactional: invalid data leaves the previous list available.
 
+A country with one city produces only a country-wide option. Its `single_city` name remains in the location record for search and city totals. Countries with multiple cities retain a country-wide option and each specific city. Every city is validated before collapsing rows. Recommendation filters and connection control are unchanged.
+
+The native host groups matching choices in an AppKit outline view. Multi-city countries expand to reveal “Any city” and specific cities; single-city countries have no disclosure arrow. A city search includes its country as context and opens the group. Expansion state is retained during other renders, while a changed search opens matching groups. `LocationItem` supplies the object identity required by NSOutlineView; the offline self-check exercises the same hierarchy builder used by the popover.
+
 ## Native VPN module
 
 `NativeVPN` exposes observe, connect, disconnect, and status delivery. It hides private declarations, ordinary Authorization Services, session lifecycle, stop-before-save ordering, and independent readback of a saved configuration. The host supplies a validated hostname, username, and opaque persistent Keychain reference.

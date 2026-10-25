@@ -55,9 +55,17 @@ The native regression first failed because Start supplied no credential options.
 
 A separate Rust regression reproduced a later Disconnected event overwriting the specific native failure. It failed before the error-retention change and now passes. Formatting, all three Rust tests, Clippy, optimized native compilation, signature verification, the offline self-check, account/access-policy checks, and native regressions pass.
 
-Live provider acceptance and removal of the repeated password dialog remain unconfirmed. Development verification did not start or stop a VPN or change network or Tailscale settings.
+The user subsequently confirmed that VPN connections work and location switching is seamless with 0.2.3. This is a report from one Mac, not a cross-device acceptance test. Independent Tailscale reachability, sleep/wake, and network-transition tests remain outstanding. Development verification did not start or stop a VPN or change network or Tailscale settings.
 
 The 0.2.3 release executable is 1,134,128 bytes and the app bundle is 1,546,965 bytes, approximately 1.48 MiB. The installed executable and ZIP matched the checked candidate. A fresh menu-bar process with its popover closed used 36,976 KiB RSS, approximately 36.1 MiB, in four one-second-spaced samples. CPU was 0.0% and cumulative CPU time was unchanged. This excludes browser sign-in and active IKEv2 service cost; it is a short idle observation rather than a hard budget or a comparison under the same workload as earlier releases.
+
+## Country disclosure rows, version 0.2.4
+
+The catalogue regression reproduced duplicate country/city entries for Singapore before the change. It now verifies one country option, sole-city searches finding their country, retained choices for multi-city countries, and country-wide recommendation filters. Invalid sole-city data is still rejected transactionally. The native self-check verifies the displayed scope labels and the same country/city hierarchy builder used by the popover, including country context for city-only searches.
+
+All four Rust tests, formatting, Clippy, optimized native compilation, signature verification, and offline native/account checks pass. Native accessibility inspection confirmed one Singapore row without a disclosure action, a United Kingdom disclosure group containing “Any city” and its four cities, automatic expansion when searching, and successful collapse. The footer retains the full cached catalogue totals of 150 countries and 225 cities.
+
+The app uses NSOutlineView with no added dependency. Credential handoff, VPN control, recommendation filters, and network/Tailscale settings were not changed. No connection action was executed during UI verification.
 
 ## Initial measurements
 

@@ -11,7 +11,7 @@ Date: 2026-10-24. Initial local release build on Apple Silicon, macOS 26.5.2.
 - AppKit accessibility and visual inspection in the native preview. Verified live search, empty results, arrow-key selection, connection-button enablement, branding, and Settings. Settings text wrapping was corrected after inspection.
 - Public-source scan for local machine paths, device identifiers, email addresses, and token/private-key patterns. Diagnostic scratch files and build products are excluded from Git.
 
-Reproduce the offline checks with `rtk proxy bash scripts/check.sh`. Optional live public-metadata verification uses `rtk proxy build/Meridian.app/Contents/MacOS/Meridian --check-catalogue`; it makes three public requests and performs zero VPN operations. `--preview` opens the same interface in a standard native window for accessibility inspection.
+Reproduce the offline checks with `bash scripts/check.sh`. Optional live public-metadata verification uses `build/Meridian.app/Contents/MacOS/Meridian --check-catalogue`; it makes three public requests and performs zero VPN operations. `--preview` opens the same interface in a standard native window for accessibility inspection.
 
 ## Nord Account import, version 0.2.0
 
@@ -66,6 +66,8 @@ The catalogue regression reproduced duplicate country/city entries for Singapore
 All four Rust tests, formatting, Clippy, optimized native compilation, signature verification, and offline native/account checks pass. Native accessibility inspection confirmed one Singapore row without a disclosure action, a United Kingdom disclosure group containing “Any city” and its four cities, automatic expansion when searching, and successful collapse. The footer retains the full cached catalogue totals of 150 countries and 225 cities.
 
 The app uses NSOutlineView with no added dependency. Credential handoff, VPN control, recommendation filters, and network/Tailscale settings were not changed. No connection action was executed during UI verification.
+
+The public build scripts and CI no longer require the agent's command wrapper. The complete build and offline check script passed with `rtk` absent from its PATH, using only the rustup toolchain and system command-line tools. This changed build tooling and documentation; the running app and VPN session were not replaced or controlled.
 
 ## Initial measurements
 

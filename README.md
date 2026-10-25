@@ -12,12 +12,12 @@ The no-paid-signing implementation uses private macOS configuration and session 
 
 ## Build
 
-Install Apple's Command Line Tools, a stable Rust toolchain through rustup, and [rtk](https://github.com/rtk-ai/rtk). Then run:
+Install Apple's Command Line Tools and a stable Rust toolchain through rustup. Then run:
 
 ```sh
-rtk proxy rustup component add rustfmt clippy
-rtk proxy bash scripts/check.sh
-rtk proxy open build/Meridian.app
+rustup component add rustfmt clippy
+bash scripts/check.sh
+open build/Meridian.app
 ```
 
 The script uses the rustup toolchain explicitly, builds for the current Mac's architecture, and ad-hoc signs `build/Meridian.app`. It does not install or launch the application, register a login item, change a VPN, or request a network authorization. No paid signing identity is needed for this local build. This is not a notarized distribution build.
@@ -25,7 +25,7 @@ The script uses the rustup toolchain explicitly, builds for the current Mac's ar
 `--self-check` exercises Rust through the native interface and checks native symbol availability. It never saves a VPN, accesses credentials, installs certificates, or starts a tunnel:
 
 ```sh
-rtk proxy build/Meridian.app/Contents/MacOS/Meridian --self-check
+build/Meridian.app/Contents/MacOS/Meridian --self-check
 ```
 
 For a read-only check against Nord's current public metadata, run the same executable with `--check-catalogue`. It fetches and validates the catalogue and one recommendation, tests conditional refresh, and reports body-transfer metrics. It performs no VPN operation.
@@ -56,7 +56,7 @@ Quitting leaves the current VPN as it is and stops the app's automatic reconnect
 - Bounded responses, conditional catalogue refresh, a small disk cache, and event-driven VPN status. Automatic reconnection reuses the selected endpoint.
 - Account import makes three bounded API requests plus the system browser's sign-in traffic. No account polling, persistent account session, embedded web view, or added HTTP/TLS library.
 - No Wi-Fi, global DNS, route, Tailscale, or other-VPN preference changes. Only Meridian's UUID with matching app ownership can be updated or controlled.
-- No kill switch. When the tunnel is disconnected, ordinary traffic may use the normal connection.
+- No kill switch. Disconnect stops the NordVPN tunnel and automatic reconnects; your normal internet connection remains available. If the tunnel drops or a location switch leaves a gap, ordinary traffic may use that connection until the VPN reconnects.
 
 Tailscale coexistence is a design requirement and a live acceptance test, not a guaranteed result of these settings. See [verification](docs/verification.md) for measurements and known limits.
 

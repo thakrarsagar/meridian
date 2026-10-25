@@ -15,7 +15,7 @@ Read `CONTEXT.md` for domain language and `docs/architecture.md` before changing
 - Use AppKit controls, semantic system colors, SF Symbols, keyboard navigation, and accessibility labels. Keep layout metrics in `Style`; use native appearance and reduced-motion behavior. No embedded browser, downloaded fonts, decorative animation, or custom rendering loop.
 - Use system HTTP/TLS. Fetch locations on first use and explicit refresh; fetch one recommendation per Connect. Bound response size and time. No catalogue polling, full inventory, telemetry, or continuous probes.
 - Keep errors actionable and connection status truthful. A requested location is distinct from a confirmed connection. A failed switch retains the request and offers Retry.
-- Prefix shell commands with `rtk`; use `rtk proxy` for unfiltered commands. Build and check with the scripts under `scripts/`. Run Rust tests and the offline native self-check for behavior changes.
+- Prefix agent-issued shell commands with `rtk`; use `rtk proxy` for unfiltered commands. Keep public build scripts and CI independent of agent tooling. Build and check with the scripts under `scripts/`. Run Rust tests and the offline native self-check for behavior changes.
 - Keep public files free of credentials, local network identifiers, machine paths, logs, and diagnostic scratch files. Commit the lockfile; exclude build products and caches.
 
 Before adding a dependency or module, explain which existing platform facility cannot meet the requirement. Measure release memory and CPU rather than claiming a footprint from language choice.
